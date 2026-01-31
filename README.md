@@ -25,6 +25,7 @@ The repository includes code for:
 ## Repository structure
 
 - `code/` – All analysis scripts (R, bash, SLURM)
+- `reports/` – Rendered HTML versions of Rmd-files for readability
 - `data/` – Metadata and small derived tables (raw data not included)
 - `figures/` – Figures generated for the thesis
 - `docs/` – Supplementary documentation and workflow notes
