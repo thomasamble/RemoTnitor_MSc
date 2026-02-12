@@ -1,0 +1,392 @@
+---
+title: "Alpha and beta diversity"
+author: "Thomas Amble Karlsen"
+date: "2026-02-08"
+output: 
+  rmdformats::downcute:
+    self_contained: true  
+    thumbnails: true  
+    lightbox: true  
+    gallery: false  
+    highlight: tango  
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+
+## Loading packages
+
+```{r}
+library(tidyverse) # general usage (wrangling, plotting...)
+library(phyloseq) # exploring the microbiome
+library(microViz) # visualization and wrangling of phyloseq objects
+library(vegan) # diversity analysis
+library(lme4) # statistics
+library(lmerTest) # statistics
+library(pairwiseAdonis) # statistics
+library(patchwork) # plotting
+library(cowplot) # plotting
+library(paletteer) # color palettes
+```
+
+
+## Loading data
+
+```{r, results='hide'}
+readRDS("/Users/thomasamble/Downloads/Master/R_master/rds/phyloseq.rds") %>% 
+  list2env(envir = .GlobalEnv)
+
+set.seed(123) # setting seed for reproducibility
+```
+
+## Alpha diversity
+
+Calculating alpha diversity metrics Shannon diversity and observed richness using `phyloseq::estimate_richness()` on the rarefied and non-rarefied non-control phyloseq objects.
+
+```{r}
+# Using phyloseq::estimate_richness() to estimate Shannon diversity and observed richness:
+
+alpha_main <- estimate_richness(main_ps, measures = c("Shannon", "Observed")) %>% 
+  rownames_to_column("Sample")
+
+alpha_rarefied <- estimate_richness(rarefied_ps, measures = c("Shannon", "Observed")) %>% 
+  rownames_to_column("Sample")
+
+alpha_comp <- left_join(alpha_main, alpha_rarefied, by = "Sample", suffix = c("_main", "_rarefied"))
+```
+
+### Plotting rarefaction effect on alpha diversity metrics
+
+Plotting alpha diversity metrics for rarefied data against non-rarefied data and adding a 1:1 reference line for comparability.
+
+```{r}
+# Plotting difference in Shannon diversity and Observed richness before and after rarefaction.
+plot_shannon_comp <- alpha_comp %>% 
+  ggplot(aes(x = Shannon_main, 
+             y = Shannon_rarefied)) +
+  geom_point(size = 3) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal(base_size = 9) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  labs(x = "Shannon (original)",
+       y = "Shannon (rarefied)",
+       title = "A) Shannon diversity\nbefore vs. after rarefaction")
+
+plot_observed_comp <- alpha_comp %>% 
+  ggplot(aes(x = Observed_main, 
+             y = Observed_rarefied)) +
+  geom_point(size = 3) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "red") +
+  theme_minimal(base_size = 9) +
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  labs(x = "Observed (original)",
+       y = "Observed (rarefied)",
+       title = "B) Observed richness\nbefore vs. after rarefaction")
+
+plot_shannon_comp + plot_observed_comp +
+  plot_annotation(title = "Effect of rarefaction on alpha diversity",
+                  theme = theme(plot.title = element_text(size = 14, face = "bold", hjust = 0.5))) +
+  plot_layout(widths = c(1, 1), guides = "collect") &
+  theme(aspect.ratio = 1,
+        axis.title = element_text(size = 12),
+        axis.text = element_text(size = 10))
+```
+
+### Plotting Shannon diversity across season, location and animal ID
+
+Creating boxplots of Shannon diversity across season, location and animal ID. Also calculating descriptive statistics mean, median and standard deviation for both Shannon diversity and observed richness across season, location and animal ID.
+
+```{r}
+alpha_meta_rarefied <- alpha_rarefied %>% 
+  mutate(Sample = str_replace_all(Sample, "\\.", "-")) %>% 
+  left_join(sample_data(rarefied_ps) %>% 
+              as("data.frame") %>% # forcing data frame structure, as_data_frame only prints n=6
+              rownames_to_column("Sample"), by = "Sample") %>% 
+  mutate(season = factor(season, levels = c("Summer", "Autumn", "Winter")))
+
+alpha_season <- alpha_meta_rarefied %>% 
+  ggplot(aes(x = season, y = Shannon)) +
+  geom_boxplot(fill = "lightblue", outliers = F) +
+  geom_jitter(width = 0.1, alpha = 0.6, size = 3) +
+  theme_minimal() +
+  labs(y = "Shannon diversity", x = "Season") +
+  theme(axis.title = element_text(size = 13))
+
+
+alpha_location <- alpha_meta_rarefied %>% 
+  ggplot(aes(x = location, y = Shannon)) +
+  geom_boxplot(fill = "lightblue", outliers = F) +
+  geom_jitter(width = 0.1, alpha = 0.6, size = 3) +
+  theme_minimal() +
+  labs(y = "Shannon diversity", x = "Location") +
+  theme(axis.title = element_text(size = 13))
+
+alpha_id <- alpha_meta_rarefied %>% 
+  ggplot(aes(x = id_animal, y = Shannon)) +
+  geom_boxplot(fill = "lightblue", outliers = F) +
+  geom_jitter(width = 0.1, alpha = 0.6, size = 3) +
+  theme_minimal() +
+  labs(y = "Shannon diversity", x = "Animal ID") +
+  theme(axis.title = element_text(size = 13))
+
+
+alpha_season + alpha_location + alpha_id +
+  plot_layout(axes = "collect", widths = c(1, 1, 1.75)) +
+  plot_annotation(title = "Shannon diversity across season, location and animal id",
+                  tag_levels = c("A", "B", "C"),
+                  theme = theme(plot.title.position = "plot",
+                                plot.title = element_text(, size = 16, hjust = 0.5))) &
+  theme(plot.tag = element_text(face = "bold", size = 15),
+        panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6))
+
+alpha_meta_rarefied %>% 
+  group_by(season) %>% 
+  summarise(mean_Shannon = mean(Shannon), mean_Observed = mean(Observed), median_Shannon = median(Shannon), 
+            median_Observed = median(Observed), sd_Shannon = sd(Shannon), sd_Observed = sd(Observed))
+
+alpha_meta_rarefied %>% 
+  group_by(location) %>% 
+  summarise(mean_Shannon = mean(Shannon), mean_Observed = mean(Observed), median_Shannon = median(Shannon), 
+            median_Observed = median(Observed), sd_Shannon = sd(Shannon), sd_Observed = sd(Observed))
+
+alpha_meta_rarefied %>% 
+  group_by(id_animal) %>% 
+  summarise(mean_Shannon = mean(Shannon), mean_Observed = mean(Observed), median_Shannon = median(Shannon), 
+            median_Observed = median(Observed), sd_Shannon = sd(Shannon), sd_Observed = sd(Observed))
+```
+
+### Alpha diversity: Statistical testing
+
+Fitting separate linear models with Shannon diversity and observed richness as response variables, with season and location as fixed effects. Also fitting similar models with the exclusion of sample WKR24-79, which revealed substantially lower Shannon diversity and observed richness. Performing analysis of variance (ANOVA) on all four models for testing of overall effect of fixed effects, and summary for pairwise testing. Plotting residuals vs fitted and Q-Q residuals for model diagnostics.
+
+```{r}
+lm_Shannon <- lm(Shannon ~ season + location, data = alpha_meta_rarefied)
+anova(lm_Shannon)
+summary(lm_Shannon)
+
+plot(lm_Shannon, which = c(1:2))
+
+lm_Observed <- lm(Observed ~ season + location, data = alpha_meta_rarefied)
+anova(lm_Observed)
+summary(lm_Observed)
+
+plot(lm_Observed, which = c(1:2))
+
+
+lm_Shannon_rf <- lm(Shannon ~ season + location, data = alpha_meta_rarefied %>% 
+                      filter(Sample != "WKR24-79"))
+anova(lm_Shannon_rf)
+summary(lm_Shannon_rf)
+
+lm_Observed_rf <- lm(Observed ~ season + location, data = alpha_meta_rarefied %>% 
+                       filter(Sample != "WKR24-79"))
+anova(lm_Observed_rf)
+summary(lm_Observed_rf)
+
+```
+
+Also fitting linear mixed effect models, with the same model, now including animal ID as a random effect to account for repeated sampling.
+
+```{r}
+# Samples are repeated measures on animals, thus creating a model treating id_animal as a random effect
+lmm_Shannon <- lmer(Shannon ~ season + location + (1 | id_animal), data = alpha_meta_rarefied)
+summary(lmm_Shannon)
+anova(lmm_Shannon)
+
+lmm_Observed <- lmer(Observed ~ season + location + (1 | id_animal), data = alpha_meta_rarefied)
+summary(lmm_Observed)
+anova(lmm_Observed)
+
+# Model diagnostics:
+## residuals vs fitted (lmm_Shannon):
+plot(lmm_Shannon, col = lmm_Shannon@frame$location)
+### roughly centered around 0, one at -2, no strong evidence for homoscedasticity 
+
+## Q-Q plot (lmm_Shannon):
+qqnorm(resid(lmm_Shannon)); qqline(resid(lmm_Shannon))
+### residuals are mostly normally distributed, with one outlier
+
+
+## residuals vs fitted (lmm_Observed):
+plot(lmm_Observed, col = lmm_Observed@frame$location)
+## Q-Q plot (lmm_Observed):
+qqnorm(resid(lmm_Observed)); qqline(resid(lmm_Observed))
+
+
+# re-fitted:
+lmm_Shannon_rf <- lmer(Shannon ~ season + location + (1 | id_animal), data = alpha_meta_rarefied %>% filter(Sample != "WKR24-79"))
+summary(lmm_Shannon_rf)
+anova(lmm_Shannon_rf)
+
+lmm_Observed_rf <- lmer(Observed ~ season + location + (1 | id_animal), data = alpha_meta_rarefied %>% filter(Sample != "WKR24-79"))
+summary(lmm_Observed_rf)
+anova(lmm_Observed_rf)
+```
+
+
+## Beta diversity (Bray-Curtis + NMDS)
+
+Aggregating the rarefied phyloseq object to species taxonomic rank, and creating a distance matrix with Bray-Curtis distances using `microViz::dist_calc()` and calculating non-metric multidimensional scaling ordinance using `microViz::ord_calc()`. Then plotting the NMDS ordinance using `microViz::ord_plot()` with 95% confidence ellipses, with points and ellipses colored after season, location and animal ID.
+
+```{r}
+# Creating ordinance object for rarefied phyloseq-object
+rarefied_nmds <- rarefied_ps %>% 
+  tax_agg(rank = "species") %>% 
+  dist_calc("bray") %>% 
+  ord_calc("NMDS")
+
+xlims <- c(-1.35, 0.65)
+ylims <- c(-0.4, 0.4)
+rarefied_nmds@ord # finds the stress-value
+
+b_season <- rarefied_nmds %>% 
+  ord_plot(colour = "season", size = 3) +
+  stat_ellipse(aes(group = season, fill = season, color = season),
+               type = "t", level = 0.95, geom = "polygon", alpha = 0.2) +
+  scale_colour_paletteer_d("ltc::trio4") +
+  scale_fill_paletteer_d("ltc::trio4") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  labs(title = "A) Season",
+       caption = NULL, 
+       colour = "Season", fill = "Season") +
+  coord_cartesian(xlim = xlims, ylim = ylims)
+
+b_location <- rarefied_nmds %>% 
+  ord_plot(colour = "location", size = 3) +
+  stat_ellipse(aes(group = location, fill = location, color = location),
+               type = "t", level = 0.95, geom = "polygon", alpha = 0.2) +
+  scale_colour_paletteer_d("ltc::trio1") +
+  scale_fill_paletteer_d("ltc::trio1") +
+  theme_minimal() +
+  theme(legend.position = "right") +
+  labs(title = "B) Location",
+       caption = NULL,
+       colour = "Location", fill = "Location") +
+  coord_cartesian(xlim = xlims, ylim = ylims)
+
+b_id <- rarefied_nmds %>% 
+  ord_plot(colour = "id_animal", size = 3) +
+  scale_colour_paletteer_d("MoMAColors::Klein") +
+  theme_minimal()+
+  theme(legend.position = "right") +
+  labs(title = "C) Animal ID",
+       caption = NULL,
+       colour = "Animal ID", fill = "Animal ID") +
+  coord_cartesian(xlim = xlims, ylim = ylims) +
+  guides(colour = guide_legend(ncol = 2))
+
+b_season + b_location + b_id + 
+  plot_layout(ncol = 1)
+
+
+#legend_box <- theme(legend.position = "right",
+                    #legend.background = element_rect(fill = "white", colour = "grey40"),
+                    #legend.box.background = element_rect(fill = "white", colour = "grey40"),
+                    #legend.key = element_rect(),
+                    #legend.title = element_text(size = 11, margin = margin(b = 4)),
+                    #legend.text  = element_text(size = 10))
+
+#leg_season <- get_legend(b_season + legend_box)
+#leg_location <- get_legend(b_location + legend_box)
+#leg_id <- get_legend(b_id + legend_box + guides(colour = guide_legend(ncol = 2)))
+
+
+#b_legend <- plot_grid(ggdraw() +
+                        #draw_label(paste0("NMDS stress = 0.0658"), x = 0.25, y = 0.7, hjust = 0, size = 13),
+                      #plot_grid(leg_season, leg_location, leg_id, nrow = 1),
+                      #ncol = 1)
+
+#(b_season | b_location) /
+#(b_id | b_legend)
+```
+
+### Beta diversity: Statistical testing
+
+Performing permutational multivariate analysis of variance (PERMANOVA) on Bray-Curtis distance matrices using `microViz::dist_permanova()` (a wrapper around `vegan::adonis2()`) at species-level with 99999 permutations. First using only season as explanatory variable, and then using an interaction term with season and location. Acquiring model results using `microViz::perm_get()` for both models. Estimating beta dispersion using `vegan::betadisper()`.
+
+Additionally performing pariwise PERMANOVA using `pairwiseAdonis::pairwise.adonis2()` with season as the explanatory variable. Also doing this with location as explanatory variable, but only as an exploratory analysis due to the partial confounding of location.
+
+```{r}
+# Creating distance matrix with Bray-Curtis dissimilarity as done previously, and running a PERMANOVA with dist_permanova
+## Can not include id_animal as a fixed effects, and dist_permanova does not accept random effects. Ends up eating up all the degrees of freedom
+## PERMANOVA assumes independence, which is not the case for my explanatory variables, thus only running on season (the least confounded variable)
+res <- rarefied_ps %>%
+  tax_agg(rank = "species") %>%
+  dist_calc("bray") %>%
+  dist_permanova(variables = "season",
+                 n_perms = 99999)
+
+res2 <- rarefied_ps %>%
+  tax_agg(rank = "species") %>%
+  dist_calc("bray") %>%
+  dist_permanova(variables = c("season", "location"),
+                 interactions = "season * location",
+                 n_perms = 99999)
+
+perm_get(res) # significant effect of season
+perm_get(res2) # no significant evidence for interaction between season and location
+
+
+# Beta dispersion
+bray_mat <- rarefied_ps %>%
+  tax_agg(rank = "species") %>%
+  dist_calc("bray") %>% 
+  dist_get()
+
+beta_dispersion <- betadisper(bray_mat, metadata %>% slice(1:25) %>% pull(season)) # using slice to exclude control samples
+beta_dispersion %>% anova() # no significant beta dispersion
+
+
+# Pairwise adonis2
+pairwise.adonis2(bray_mat ~ season, data = metadata[1:25,], nperm = 99999)
+pairwise.adonis2(bray_mat ~ location, data = metadata[1:25,], nperm = 99999)
+```
+
+#### Statistical testing on non-rarefied data
+
+Performing the exact same steps as above, but for the non-rarefied data as a comparison.
+
+```{r}
+res_nr <- main_ps %>%
+  tax_agg(rank = "species") %>%
+  dist_calc("bray") %>%
+  dist_permanova(variables = "season",
+                 n_perms = 99999)
+
+res2_nr <- main_ps %>%
+  tax_agg(rank = "species") %>%
+  dist_calc("bray") %>%
+  dist_permanova(variables = c("season", "location"),
+                 interactions = "season * location",
+                 n_perms = 99999)
+
+perm_get(res_nr) # significant effect of season
+perm_get(res2_nr) # no significant evidence for interaction between season and location
+
+
+# Beta dispersion
+bray_mat_nr <- main_ps %>%
+  tax_agg(rank = "species") %>%
+  dist_calc("bray") %>% 
+  dist_get()
+
+beta_dispersion_nr <- betadisper(bray_mat_nr, metadata %>% slice(1:25) %>% pull(season)) # using slice to exclude control samples
+beta_dispersion_nr %>% anova() # no significant beta dispersion
+
+
+# Pairwise adonis2
+pairwise.adonis2(bray_mat_nr ~ season, data = metadata[1:25,], nperm = 99999)
+pairwise.adonis2(bray_mat_nr ~ location, data = metadata[1:25,], nperm = 99999)
+```

@@ -1,0 +1,97 @@
+---
+title: "Total reads"
+author: "Thomas Amble Karlsen"
+date: "2026-02-08"
+output: 
+  rmdformats::downcute:
+    self_contained: true  
+    thumbnails: true  
+    lightbox: true  
+    gallery: false  
+    highlight: tango  
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+
+## Loading libraries
+
+```{r}
+library(tidyverse) # general usage (wrangling, plotting...)
+library(RColorBrewer) # coloring plots
+library(scales) # formatting percentages
+```
+
+## Loading data
+
+```{r}
+gen.stats <- read_delim("/Users/thomasamble/Downloads/Master/R_master/QC_directly_reads/multiqc_general_stats.txt", delim = "\t")
+```
+
+## Extracting reads per sample
+
+```{r}
+merged_samples <- gen.stats %>% 
+  mutate(merged_reads = Sample %>% 
+           str_remove("_S\\d+_L\\d{3}") %>% 
+           str_remove("_001$")) %>% 
+  relocate(Sample, merged_reads)
+```
+
+## Plotting
+
+Summarising read counts for R1 per sample across sequencing lanes, and plotting. Also calculating mean read count across samples (excluding control samples).
+
+```{r}
+pal <- colorRampPalette(c("lightgreen", "forestgreen"))
+
+R1_merged <- merged_samples %>% 
+  group_by(merged_reads) %>% 
+  summarise(n_reads = sum(FastQC_mqc_generalstats_fastqc_total_sequences)) %>% 
+  filter(str_detect(merged_reads, "R1$")) %>% 
+  mutate(merged_reads = str_remove(merged_reads, "^\\d+-"),
+         merged_reads = fct_reorder(merged_reads, n_reads))
+
+R1_merged %>% 
+  ggplot(aes(x = merged_reads,
+             y = n_reads,
+             fill = merged_reads)) +
+  geom_col(width = 1, color = "black", linewidth = 0.4) +
+  geom_hline(yintercept = 50, color = "red", linewidth = 0.75, linetype = "dashed") +
+  geom_text(aes(label = number(n_reads, accuracy = 0.1)), hjust = -0.2, size = 3) +
+  coord_flip() +
+  labs(title = "Read counts per sample (R1, lanes combined)",
+       subtitle = "Dashed line = 50M target",
+       y = "Reads (million)",
+       x = "Sample (Combined R1)") +
+  scale_y_continuous(breaks = c(0, 25, 50, 75, 100, 125),
+                     limits = c(0, max(R1_merged$n_reads) * 1.1),
+                     expand = c(0, 0)) +
+  scale_fill_manual(values = pal(nrow(R1_merged))) +
+  theme_minimal() +
+  theme(legend.position = "none",
+        axis.text.x = element_text(face = "bold"),
+        axis.text.y = element_text(face = "bold"))
+
+
+# mean read amount (without controls)
+R1_merged %>% 
+  filter(!merged_reads %in% c("Spike-incontrol_R1", "Microbiotacontrol_R1")) %>% 
+  summarise(mean = mean(n_reads))
+```
+
+
+
+
+

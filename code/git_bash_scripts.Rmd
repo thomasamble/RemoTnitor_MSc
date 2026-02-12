@@ -1,0 +1,183 @@
+---
+title: "bash scripts"
+author: "Thomas Amble Karlsen"
+date: "2026-02-08"
+output: 
+  rmdformats::downcute:
+    self_contained: true  
+    thumbnails: true  
+    lightbox: true  
+    gallery: false  
+    highlight: tango  
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      eval = F,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+---
+
+**This file contains all scripts used in the Sigma2 high-throughput computing cluster saga. All #SBATCH information is excluded.**
+
+---
+
+
+## Initial QC
+
+Performing quality control using `FastQC` (version 0.11.9).
+
+```{bash}
+input=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/data/reads
+output=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/results/fastqc/results
+files=($(ls ${input}/*.fastq.gz))
+input_file=${files[$SLURM_ARRAY_TASK_ID]}
+
+
+# Activate modules and envs
+module load Miniconda3/23.10.0-1
+source ${EBROOTMINICONDA3}/bin/activate
+conda activate /cluster/projects/nn9305k/src/miniconda/envs/fastqc
+
+# Run
+fastqc --outdir $output $input_file
+```
+
+
+## Host genome indexing with Bowtie2
+
+Indexing the genome of the host organism, Rangifer tarandus, using `bowtie2-build` (version 2.5.1).
+
+```{bash}
+# Paths
+genome_zip=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/data/bowtie2_indexing/GCA_949782905.1_mRanTar1.h1.1_genomic.fna.gz
+prefix=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/data/bowtie2_indexing/GCA_949782905.1_mRanTar1.h1.1_genomic
+genome_unzip="${prefix}.fna"
+
+# Activating modules and environments
+module load Bowtie2/2.5.1-GCC-12.3.0
+
+# Unzipping genome file
+gunzip -c "$genome_zip" > "$genome_unzip"
+
+# Running bowtie2-build
+bowtie2-build --large-index --threads 24 "$genome_unzip" "$prefix"
+```
+
+## Taxprofiler
+
+Running the Taxprofiler pipeline from nf-core. Using a minimum read length of 36 bp for QC. Performing run merging to concatenate FASTQ files from different sequencing lanes. Running Kraken2+Bracken, Centrifuge and MetaPhlAn for taxonomic classification.
+
+```{bash}
+module load Java/21.0.2
+
+
+/cluster/projects/nn9305k/bin/nextflow_25.04.7 run /cluster/projects/nn10070k/pipelines/nf-core-taxprofiler_1.2.3/1_2_3/main.nf \
+-profile apptainer \
+-work-dir $USERWORK/taxprofiler \
+--input /cluster/projects/nn10070k/projects/remotnitor/thomas_master/data/taxprofiler/samplesheet.csv \
+--databases /cluster/projects/nn10070k/projects/remotnitor/thomas_master/data/taxprofiler/databasesheet.csv \
+--outdir /cluster/projects/nn10070k/projects/remotnitor/thomas_master/results/taxprofiler \
+--multiqc_title "MultiQC_remotnitor" \
+--perform_shortread_qc \
+--perform_shortread_complexityfilter \
+--shortread_qc_minlength 36 \
+--perform_shortread_hostremoval \
+--hostremoval_reference /cluster/projects/nn10070k/projects/remotnitor/thomas_master/data/bowtie2_indexing/GCA_949782905.1_mRanTar1.h1.1_genomic.fna \
+--shortread_hostremoval_index /cluster/projects/nn10070k/projects/remotnitor/thomas_master/data/bowtie2_indexing \
+--perform_runmerging \
+--run_centrifuge \
+--run_kraken2 \
+--run_bracken \
+--bracken_save_intermediatekraken2 \
+--run_metaphlan \
+--run_profile_standardisation \
+--run_krona \
+-c /cluster/projects/nn10070k/configs/saga_taxprofiler.config \
+-resume
+```
+
+
+## TaxonKit & csvtk
+
+This script creates a taxonomy table to supply the Bracken table for integration into a phyloseq object, using TaxonKit and csvtk.
+
+```{bash}
+# Stop the script if anything fails
+set -e
+
+# Setup:
+in_file=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/results/taxprofiler/taxpasta/bracken_PlusPFP_14.07.2025.tsv
+tax_ids=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/results/taxprofiler/taxpasta/taxids.txt
+database=/cluster/projects/nn10070k/databases/kraken2_pluspfp_14.07.2025
+out_file=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/results/taxprofiler/taxpasta/bracken_lineages.tsv
+
+# First: Creating a list of all taxonomy ids in the bracken file
+     # cut -f1: extract the first column
+     # tail -n +2: remove the header (print everything starting from line 2)
+     # grep '^[0-9]\+$': keeps only numeric rows
+     # sort -u: sort and deduplicate taxonomy ids
+
+cut -f1 $in_file \
+| tail -n +2 \
+| grep '^[0-9]\+$' \
+| sort -u > $tax_ids
+
+# Then: Creating the table with lineages
+     # taxonkit reformat2: builds and reformats a lineage table to include the wanted ranks
+          # -f: specifies format, {superkingdom|domain|acellular root} means choose whichever exists, in that specified order
+          # -r "": missing ranks are left empty
+          # -T: do not fill lower ranks to be the same as the higher ranks
+     # csvtk add-header: adds a header
+     # csvtk sep: splits the lineage_string column into the different ranks
+     # csvtk cut: keeps only the relevant columns
+
+taxonkit reformat2 \
+  --data-dir $database \
+  -f '{superkingdom|domain|acellular root};{phylum};{class};{order};{family};{genus};{species}' \
+  -r '' -T \
+  $tax_ids \
+| csvtk -t add-header -n taxid,lineage_string \
+| csvtk -H -t sep -f lineage_string -s ';' -N 7 -R --merge \
+     -n top_rank,phylum,class,order,family,genus,species \
+| csvtk -H -t cut -f taxid,top_rank,phylum,class,order,family,genus,species \
+> $out_file
+```
+
+## Removing reads mapped to several taxa from MetaPhlAn results
+
+Removing deduplicated reads (reads that map to several marker genes) from the MetaPhlAn results.
+
+```{bash}
+cd /cluster/projects/nn10070k/projects/remotnitor/thomas_master/results/taxprofiler/metaphlan/mpa_vJan25_CHOCOPhlAnSGB_202503
+
+out_file=/cluster/projects/nn10070k/projects/remotnitor/thomas_master/results/taxprofiler/metaphlan/metaphlan_bowtie2_merged_mapped.tsv
+
+# creating header:
+echo -e "sample\tmapped_reads" > "$out_file"
+
+# looping over all .metaphlan.bowtie2out.txt-files
+for file in *.metaphlan.bowtie2out.txt; do
+    sample=$(basename "$file" .metaphlan.bowtie2out.txt)
+
+    # count number of unique read ids mapped:
+        # cut -f1: extracts the first column (read ids)
+        # sort -u: removes deduplicates within the first column
+        # wc -l: counts how many unique mapped reads are left after deduplication
+    mapped=$(cut -f1 | sort -u | wc -l)
+
+    # merging results from each file into a new file
+    echo -e "${sample}\t${mapped}" >> "$out_file"
+done
+```
+
+

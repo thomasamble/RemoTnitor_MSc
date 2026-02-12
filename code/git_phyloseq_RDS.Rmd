@@ -1,0 +1,143 @@
+---
+title: "git_phyloseq_RDS"
+author: "Thomas Amble Karlsen"
+date: "2026-02-08"
+output: 
+  rmdformats::downcute:
+    self_contained: true  
+    thumbnails: true  
+    lightbox: true  
+    gallery: false  
+    highlight: tango  
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+
+## Loading libraries
+
+```{r}
+library(tidyverse)
+library(readxl)
+library(phyloseq)
+library(microViz)
+```
+
+
+## Reading required files
+
+Reading and wrangling required files.
+
+```{r}
+# Metadata:
+metadata <- read_excel("metadata_reinsdyr.xlsx")
+
+# Read counts:
+bracken_counts <- read_tsv("taxprofiler_taxpasta/bracken_PlusPFP_14.07.2025.tsv") %>% 
+  filter(!is.na(taxonomy_id)) %>% 
+  rename_with(~ str_remove(.x, "_PlusPFP_14.07.2025.bracken"), -taxonomy_id) %>%
+  rename_with(~ str_remove(.x, "^\\d+-"), -taxonomy_id)
+
+# Taxonomy lineages:
+bracken_lineages <- read_tsv("taxprofiler_taxpasta/bracken_lineages.tsv") %>% 
+  rename(taxonomy_id = taxid) %>% 
+  filter(!is.na(taxonomy_id))
+```
+
+## Creating objects required for phyloseq
+
+Converting tibbles to objects suitable for phyloseq.
+
+```{r}
+# Creating count matrix
+OTUs_ps <- bracken_counts %>% 
+  column_to_rownames("taxonomy_id") %>% 
+  as.matrix()
+
+# Creating taxa matrix
+taxa_ps <- bracken_lineages %>% 
+  filter(taxonomy_id %in% rownames(OTUs_ps)) %>% 
+  column_to_rownames("taxonomy_id") %>% 
+  as.matrix()
+
+# Creating sample table
+samples_ps <- metadata %>% 
+  mutate(id = str_replace_all(id, " ", "")) %>% 
+  column_to_rownames("id") %>% 
+  as.data.frame()
+```
+
+## Creating phyloseq object and fixing
+
+Creating phyloseq object and filtering out unknown taxa and human DNA.
+
+```{r}
+ps <- phyloseq(otu_table(OTUs_ps, taxa_are_rows = TRUE),
+         tax_table(taxa_ps),
+         sample_data(samples_ps)) %>% 
+  ps_mutate(id_animal = factor(id_animal))
+
+# tax_fix
+ps_fix <- ps %>% 
+  tax_fix(min_length = 4,
+          unknowns = c(""),
+          sep = " ", anon_unique = TRUE,
+          suffix_rank = "classified") %>% 
+  subset_taxa(species != "Homo sapiens") %>%  # removing human DNA
+  ps_mutate(season = factor(season),
+            location = factor(location))
+```
+
+## Subsetting and rarefaction
+
+Creating two subsets of the fixed phyloseq object `ps_fix`, one without control samples (`main_ps`) and one with only control samples (`control_ps`). Additionally creating a rarefied phyloseq object (`rarefied_ps`) using `phyloseq::rarefy_even_depth` with all samples being rarefied to 9727577 reads, the lowest number of reads (R1 & R2) across all samples. Seed 123 used for reproducibility, as `rarefy_even_depth` is random.
+
+```{r, results='hide'}
+# subset without control samples
+main_ps <- ps_fix %>% 
+  subset_samples(!sample_names(ps_fix) %in% c("Microbiotacontrol", "Spike-incontrol"))
+
+# subset with only control samples
+control_ps <- ps_fix %>% 
+  subset_samples(sample_names(ps_fix) %in% c("Microbiotacontrol", "Spike-incontrol"))
+
+# amount of mapped reads per sample (excluding control samples)
+sample_sums(main_ps) %>% 
+  as.data.frame() %>% 
+  rownames_to_column(var = "sample") %>% 
+  rename("mapped_reads" = ".") %>% 
+  arrange(desc(mapped_reads))
+
+# setting seed for reproducibility
+set.seed(123)
+
+# creating a rarefied phyloseq object with depth equal to the sample with the lowest depth
+rarefied_ps <- main_ps %>% 
+  rarefy_even_depth(sample.size = min(sample_sums(main_ps)))
+```
+
+## Creating RDS file
+
+Creating and RDS file containing objects `main_ps`, `control_ps`, `rarefied_ps` and `metadata` for use in other scripts.
+
+```{r}
+list_ps <- list(main_ps = main_ps,
+                control_ps = control_ps,
+                rarefied_ps = rarefied_ps,
+                metadata = metadata)
+
+saveRDS(list_ps, file = "rds/phyloseq.rds")
+```
+
+

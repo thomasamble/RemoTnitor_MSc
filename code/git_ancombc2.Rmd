@@ -1,0 +1,151 @@
+---
+title: "ANCOM-BC2"
+author: "Thomas Amble Karlsen"
+date: "2026-02-12"
+output: 
+  rmdformats::downcute:
+    self_contained: true  
+    thumbnails: true  
+    lightbox: true  
+    gallery: false  
+    highlight: tango  
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+## Loading libraries
+
+```{r}
+library(tidyverse) # general usage (wrangling, plotting...)
+library(phyloseq) # exploring the microbiome
+library(microViz) # wrangling and visualization of phyloseq data
+library(ANCOMBC) # differential abundance analysis
+library(ggh4x) # plotting
+```
+
+## Loading data
+
+```{r}
+readRDS("/Users/thomasamble/Downloads/Master/R_master/rds/phyloseq.rds") %>% 
+  list2env(envir = .GlobalEnv)
+```
+
+## Running ANCOM-BC2
+
+First filtering out taxa with relative abundances below 0.1%, and subsetting to only bacterial taxa. Then converting back to count data, the required input for ANCOM-BC2. Then running ANCOM-BC2 with season and location as fixed effects, at species level, with a prevalence cutoff at 10%, meaning the species have to be present in at least 10% of the samples. ANCOM-BC2 was run twice, once using p-value adjustment method Holm-Bonferroni (holm), and once using Benjamini-Hochberg (bh).
+
+```{r}
+ancombc_holm <- main_ps %>% 
+  tax_transform("compositional") %>% 
+  tax_filter(min_sample_abundance = 0.001, tax_level = "unique",
+             use_counts = FALSE, prev_detection_threshold = 0) %>% 
+  ps_get(counts = TRUE) %>% 
+  subset_taxa(top_rank == "Bacteria") %>% 
+  ancombc2(fix_formula = "season + location",
+           tax_level = "species",
+           p_adj_method = "holm",
+           alpha = 0.05,
+           prv_cut = 0.10)
+
+ancombc_bh <- main_ps %>% 
+  tax_transform("compositional") %>% 
+  tax_filter(min_sample_abundance = 0.001, tax_level = "unique",
+             use_counts = FALSE, prev_detection_threshold = 0) %>% 
+  ps_get(counts = TRUE) %>% 
+  subset_taxa(top_rank == "Bacteria") %>% 
+  ancombc2(fix_formula = "season + location",
+           tax_level = "species",
+           p_adj_method = "BH",
+           alpha = 0.05,
+           prv_cut = 0.10)
+```
+
+
+## Plotting
+
+Plotting significantly differentially abundant species for both p-value adjustment methods, and coloring by phylum.
+
+```{r}
+# Holm
+p_holm <- ancombc_holm$res %>% rename(species = taxon) %>% 
+  left_join(main_ps@tax_table %>% as.data.frame() %>% rownames_to_column("tax_id"),
+              by = "species") %>% 
+  pivot_longer(cols = matches("^(lfc|se|q|passed_ss)_"),
+               names_to = c(".value", "contrast"),
+               names_pattern = "(lfc|se|q|passed_ss)_(.*)") %>% 
+  filter(contrast != "(Intercept)", q < 0.05) %>% 
+  select(species, phylum, contrast, lfc, se, q, passed_ss) %>% 
+  mutate(contrast = case_match(contrast,
+                               "seasonSummer" ~ "Summer vs Autumn (ref.)\nadjusted for location",
+                               "locationRøros" ~ "Røros vs Mo i Rana (ref.)\nadjusted for season")) %>% 
+  ggplot(aes(x = lfc, y = reorder(species, lfc),
+             xmin = lfc - se, xmax = lfc + se, fill = phylum)) +
+  geom_errorbar(width = 0.05) +
+  geom_point(shape = 21, size = 3) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "darkgray") +
+  facet_wrap(facets = vars(contrast), ncol = 1, scales = "free_y") +
+  labs(x = "logFoldChange", y = "",
+       title = "A) Holm-Bonferroni-adjusted") +
+  scale_fill_manual(values = c("Actinomycetota" = "#A6CEE3", 
+                                "Bacillota" = "#1F78B4",
+                                "Pseudomonadota" = "#B2DF8A")) +
+  theme_bw() +
+  theme(axis.text.y = element_text(face = "italic"),
+        legend.position = "none",
+        plot.title = element_text(hjust = 1))
+
+
+# BH
+p_bh <- ancombc_bh$res %>% rename(species = taxon) %>% 
+  left_join(main_ps@tax_table %>% as.data.frame() %>% rownames_to_column("tax_id"),
+              by = "species") %>% 
+  pivot_longer(cols = matches("^(lfc|se|q|passed_ss)_"),
+               names_to = c(".value", "contrast"),
+               names_pattern = "(lfc|se|q|passed_ss)_(.*)") %>% 
+  filter(contrast != "(Intercept)", q < 0.05) %>% 
+  select(species, phylum, contrast, lfc, se, q, passed_ss) %>% 
+  mutate(contrast = case_match(contrast,
+                               "seasonSummer" ~ "Summer vs Autumn (ref.)\nadjusted for location",
+                               "locationRøros" ~ "Røros vs Mo i Rana (ref.)\nadjusted for season")) %>% 
+  ggplot(aes(x = lfc, y = reorder(species, lfc),
+             xmin = lfc - se, xmax = lfc + se, fill = phylum)) +
+  geom_errorbar(width = 0.35) +
+  geom_point(shape = 21, size = 3) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "darkgray") +
+  facet_wrap(facets = vars(contrast), ncol = 1, scales = "free_y") +
+  labs(x = "logFoldChange", y = "",
+       title = "B) Benjamini-Hochberg-adjusted") +
+  scale_fill_manual(values = c("Actinomycetota" = "#A6CEE3", 
+                                "Bacillota" = "#1F78B4",
+                                "Pseudomonadota" = "#B2DF8A")) +
+  theme_bw() +
+  theme(axis.text.y = element_text(face = "italic"),
+        legend.position = "bottom",
+        legend.justification = c(1.25,0),
+        plot.title = element_text(hjust = 1)) +
+  force_panelsizes(rows = c(1,8))
+
+p_holm + p_bh
+
+ggsave("ancombc2_comp.png")
+```
+
+
+
+
+
+
+
+
+

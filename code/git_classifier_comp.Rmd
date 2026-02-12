@@ -1,0 +1,153 @@
+---
+title: "Taxonomic classifier comparison"
+author: "Thomas Amble Karlsen"
+date: "2026-02-08"
+output: 
+  rmdformats::downcute:
+    self_contained: true  
+    thumbnails: true  
+    lightbox: true  
+    gallery: false  
+    highlight: tango  
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+
+## Loading libraries
+
+```{r}
+library(tidyverse) # general usage (wrangling, plotting...)
+library(scales) # formatting percentages
+library(kableExtra) # formatting tables
+```
+
+
+## Reading and wrangling data
+
+Reading in files from Taxprofilers Taxpasta and wrangling. First calculating input reads per sample by summarizing the total number of reads across all taxonomy IDs per sample. A sanity check was performed to evaluate whether the different taxonomic profilers had the same number of input reads, which they were. This was not included in the file. Then summarizing the number of mapped and unmapped reads for Kraken2 and Centrifuge, with mapped reads having taxonomy ID not equal to 0, and unmapped reads having taxonomy ID equal to 0. Since MetaPhlAn maps reads to several taxa (unlike Kraken2 and Centrifuge which use an LCA approach), a separate script was used to deduplicate MetaPhlAn read IDs (see git_bash_scripts.html, GI NYTT NAVN) for better comparability with Kraken2/Bracken and Centrifuge.
+
+All files were merged into one object, and fraction of classified reads per sample were calculated using the formula: $$1 - (\text{unmapped reads}/\text{input reads})$$
+
+```{r}
+### Number of reads inputted to the taxonomic classifiers ###
+input_reads <- read_tsv("taxprofiler_taxpasta/kraken2_PlusPFP_14.07.2025.tsv") %>% 
+  pivot_longer(cols = -taxonomy_id,
+               names_to = "sample",
+               values_to = "kraken_reads") %>% 
+  mutate(sample = str_remove(sample, "_PlusPFP_14.07.2025.kraken2.kraken2.report"),
+         sample = str_remove(sample, "^\\d+-")) %>% 
+  group_by(sample) %>% 
+  summarise(input_reads = sum(kraken_reads))
+
+### Kraken2 ###
+kraken_classified_reads <- read_tsv("taxprofiler_taxpasta/kraken2_PlusPFP_14.07.2025.tsv") %>% 
+  filter(taxonomy_id != 0) %>% 
+  pivot_longer(cols = -taxonomy_id,
+               names_to = "sample",
+               values_to = "mapped_reads") %>% 
+  group_by(sample) %>%
+  summarise(kraken_mapped_reads = sum(mapped_reads)) %>% 
+  ungroup() %>% 
+  mutate(sample = str_remove(sample, "_PlusPFP_14.07.2025.kraken2.kraken2.report"),
+         sample = str_remove(sample, "^\\d+-"))
+
+kraken_unmapped_reads <-  read_tsv("taxprofiler_taxpasta/kraken2_PlusPFP_14.07.2025.tsv") %>% 
+  filter(taxonomy_id == 0) %>% 
+  pivot_longer(cols = -taxonomy_id,
+               names_to = "sample",
+               values_to = "kraken_unmapped_reads") %>% 
+  mutate(sample = str_remove(sample, "_PlusPFP_14.07.2025.kraken2.kraken2.report"),
+         sample = str_remove(sample, "^\\d+-")) %>% 
+  select(-taxonomy_id)
+
+### Centrifuge ###
+centrifuge_classified_reads <- read_tsv("taxprofiler_taxpasta/centrifuge_b+a+v+h_dec2016.tsv") %>% 
+  filter(taxonomy_id != 0) %>% 
+  pivot_longer(cols = -taxonomy_id,
+               names_to = "sample",
+               values_to = "mapped_reads") %>% 
+  group_by(sample) %>%
+  summarise(centrifuge_mapped_reads = sum(mapped_reads)) %>% 
+  ungroup() %>% 
+  mutate(sample = str_remove(sample, "_b\\+a\\+v\\+h_dec2016.centrifuge"),
+         sample = str_remove(sample, "^\\d+-"))
+
+centrifuge_unmapped_reads <- read_tsv("taxprofiler_taxpasta/centrifuge_b+a+v+h_dec2016.tsv") %>% 
+  filter(taxonomy_id == 0) %>% 
+  pivot_longer(cols = -taxonomy_id,
+               names_to = "sample",
+               values_to = "centrifuge_unmapped_reads") %>% 
+  mutate(sample = str_remove(sample, "_b\\+a\\+v\\+h_dec2016.centrifuge"),
+         sample = str_remove(sample, "^\\d+-")) %>% 
+  select(-taxonomy_id)
+
+### MetaPhlAn ###
+metaphlan_classified_reads <- read_tsv("metaphlan/metaphlan_bowtie2_merged_mapped.tsv") %>% 
+  rename(metaphlan_mapped_reads = mapped_reads) %>% 
+  mutate(sample = str_remove(sample, "_mpa_vJan25_CHOCOPhlAnSGB_202503"),
+         sample = str_remove(sample, "^\\d+-"))
+
+### Merging all ###
+merged <- kraken_unmapped_reads %>% 
+  left_join(centrifuge_unmapped_reads, by = "sample") %>% 
+  left_join(metaphlan_classified_reads, by = "sample") %>% 
+  left_join(input_reads, by = "sample") %>% 
+  mutate(metaphlan_unmapped_reads = input_reads - metaphlan_mapped_reads) %>% 
+  mutate(fraction_classified_kraken = 1 - (kraken_unmapped_reads / input_reads),
+         fraction_classified_centrifuge = 1 - (centrifuge_unmapped_reads / input_reads),
+         fraction_classified_metaphlan = 1 - (metaphlan_unmapped_reads / input_reads))
+```
+
+## Plotting
+
+Plotting the percent of QC-undergone reads that were mapped to the databases used for Kraken2/Bracken, Centrifuge and MetaPhlAn for each sample. Additionally calculating the mean and median percentage of classified reads, and the standard deviation for each taxonomic profiler.
+
+```{r}
+merged %>%
+  transmute(sample,
+            Kraken2 = fraction_classified_kraken,
+            Centrifuge = fraction_classified_centrifuge,
+            MetaPhlAn = fraction_classified_metaphlan) %>%
+  pivot_longer(-sample, names_to = "method", values_to = "fraction") %>%
+  mutate(sample = reorder(sample, fraction, mean)) %>%
+  ggplot(aes(x = sample, y = fraction, fill = method)) +
+  geom_col(position = position_dodge(width = 0.8)) +
+  scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
+  coord_flip() +
+  labs(x = "Sample", y = "Reads classified after QC (%)",
+       title = "Read utilization by taxonomic profilers",
+       fill = NULL) +
+  theme_minimal(base_size = 12) +
+  theme(panel.grid.minor = element_blank())
+
+merged %>%
+  transmute(sample,
+            Kraken2 = fraction_classified_kraken,
+            Centrifuge = fraction_classified_centrifuge,
+            MetaPhlAn = fraction_classified_metaphlan) %>%
+  pivot_longer(-sample, names_to = "method", values_to = "fraction") %>%
+  mutate(sample = reorder(sample, fraction, mean)) %>%
+  group_by(method) %>% 
+  summarise(mean_pct_classified = mean(fraction) %>% percent(accuracy = 0.1),
+            median_pct_classified = median(fraction) %>% percent(accuracy = 0.1),
+            sd_pct = sd(fraction) %>% percent(accuracy = 0.1)) %>% 
+  kable()
+
+```
+
+
+
+
+

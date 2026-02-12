@@ -1,0 +1,198 @@
+---
+title: "Quality control"
+author: "Thomas Amble Karlsen"
+date: "2026-02-08"
+output: 
+  rmdformats::downcute:
+    self_contained: true  
+    thumbnails: true  
+    lightbox: true  
+    gallery: false  
+    highlight: tango  
+    code_folding: show
+    fig_caption: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+
+## Loading libraries
+
+```{r}
+library(tidyverse)
+library(patchwork)
+```
+
+## Reading data and wrangling
+
+Reading the MultiQC general statistics and wrangling to only keep input reads, reads that remained after quality filtering with `fastp`, reads that remained after complexity filtering with `BBDuk` and reads that remained after host removal with `Bowtie2` for each sample.
+
+Also reading the Kraken2 results and summarising all mapped reads except for unmapped reads (Taxonomy ID = 0) to find total number of mapped reads.
+
+Finally, combining the QC results with the Kraken2 classification results and the rarefied reads per sample.
+
+```{r}
+mqc <- read_delim("/Users/thomasamble/Downloads/Master/R_master/taxprofiler_multiQC/multiqc_general_stats.txt")
+
+mqc_reads <- mqc %>% 
+  select(Sample, `fastqc_falco_pre_trimming-total_sequences`, `fastp-filtering_result_passed_filter_reads`, `samtools_stats_stats-raw_total_sequences`, `samtools_stats_stats-reads_mapped`) %>% 
+  rename(raw_reads = `fastqc_falco_pre_trimming-total_sequences`, # input to fastqc = raw_reads
+         survived_fastp = `fastp-filtering_result_passed_filter_reads`, # passed fastp filtering
+         survived_bbduk = `samtools_stats_stats-raw_total_sequences`, # bowtie2 input = bbduk output
+         samtools_mapped = `samtools_stats_stats-reads_mapped`) %>% # reads mapped to host
+  mutate(survived_bowtie2 = survived_bbduk - samtools_mapped) %>% # bbduk output - host reads
+  select(-samtools_mapped) %>% 
+  mutate(across(c(3:5), ~.x/2)) %>% # Dividing by 2 on columns where R1 and R2 is merged
+  filter(str_detect(Sample, "NovaSeq_2025")) %>% # removing classifier rows
+  mutate(basename = str_remove(Sample, "_raw_[12]$")) %>% 
+  group_by(basename) %>% 
+  summarise(Sample = first(basename), # merging all rows because MultiQC table is ugly
+            raw_reads = first(raw_reads[!is.na(raw_reads)]),
+            survived_fastp = first(survived_fastp[!is.na(survived_fastp)]),
+            survived_bbduk = first(survived_bbduk[!is.na(survived_bbduk)]),
+            survived_bowtie2 = first(survived_bowtie2[!is.na(survived_bowtie2)])) %>% 
+  ungroup() %>% 
+  select(-basename) %>% 
+  filter(!if_all(-Sample, is.na)) %>% 
+  mutate(Sample = str_remove(Sample, "_NovaSeq_2025_L00[45]$"),
+         Sample = str_remove(Sample, "\\d+-")) %>% 
+  group_by(Sample) %>% 
+  summarise(across(everything(), sum)) %>% 
+  ungroup() %>% 
+  mutate(across(where(is.numeric), ~ .x * 1e6)) %>% 
+  rename(sample = Sample)
+
+kraken_classified_reads <- read_tsv("/Users/thomasamble/Downloads/Master/R_master/taxprofiler_taxpasta/kraken2_PlusPFP_14.07.2025.tsv") %>% 
+  filter(taxonomy_id != 0) %>% 
+  pivot_longer(cols = -taxonomy_id,
+               names_to = "sample",
+               values_to = "mapped_reads") %>% 
+  group_by(sample) %>%
+  summarise(kraken_mapped_reads = sum(mapped_reads)) %>% 
+  ungroup() %>% 
+  mutate(sample = str_remove(sample, "_PlusPFP_14.07.2025.kraken2.kraken2.report"),
+         sample = str_remove(sample, "^\\d+-"))
+
+full_read_life <- mqc_reads %>% 
+  left_join(kraken_classified_reads, by = "sample") %>% 
+  mutate(rarefied_reads = 9808431) # hard coded, might want to fix later so it is more tidy
+```
+
+## Plotting fastp, BBDuk, Bowtie2 effect
+
+Plotting the fraction of reads removed during the three QC steps per sample, alongside the total number of reads removed during QC per sample. Also performing a sanity check to see how many reads were removed during host removal for the Microbiota control sample.
+
+```{r}
+qcp1 <- full_read_life %>% 
+  mutate(removed_fastp = raw_reads - survived_fastp,
+         removed_bbduk = survived_fastp -survived_bbduk,
+         removed_bowtie2 = survived_bbduk - survived_bowtie2,
+         removed_total = removed_fastp + removed_bbduk + removed_bowtie2,
+         pct_removed_fastp = removed_fastp/removed_total * 100,
+         pct_removed_bbduk = removed_bbduk/removed_total * 100,
+         pct_removed_bowtie2 = removed_bowtie2/removed_total * 100,
+         sample = reorder(sample, pct_removed_fastp)) %>% 
+  select(sample, pct_removed_fastp, pct_removed_bbduk, pct_removed_bowtie2) %>% 
+  pivot_longer(-sample,
+               names_to = "step",
+               values_to = "percent") %>% 
+  mutate(step = factor(step, 
+                       levels = c("pct_removed_fastp",
+                                  "pct_removed_bbduk",
+                                  "pct_removed_bowtie2"),
+                       labels = c("Filtering and adapter clipping (fastp)",
+                                  "Complexity filtering (BBDuk)",
+                                  "Host Removal (Bowtie2)"))) %>% 
+  ggplot(aes(x = sample,
+             y = percent,
+             fill = step)) +
+  geom_col(color = "black", linewidth = 0.4) +
+  coord_flip() +
+  scale_fill_manual(values = c("#4D9078", "#F78154", "#EBC334")) +
+  labs(y = "% of reads removed during QC",
+       x = "Sample") + 
+    theme_minimal() +
+  theme(axis.text.y = element_text(face = "bold"),
+        legend.position = "top",
+        legend.box.margin = margin(0, 100))
+
+
+qcp2 <- full_read_life %>% 
+  mutate(removed_fastp = raw_reads - survived_fastp,
+         removed_bbduk = survived_fastp -survived_bbduk,
+         removed_bowtie2 = survived_bbduk - survived_bowtie2,
+         removed_total = removed_fastp + removed_bbduk + removed_bowtie2,
+         pct_removed_fastp = removed_fastp/removed_total * 100,
+         Sample = reorder(sample, pct_removed_fastp)) %>% 
+  select(Sample, removed_total, pct_removed_fastp) %>% 
+  ggplot(aes(x = Sample,
+             y = removed_total / 1e6)) +
+  geom_col(linewidth = 0.4) +
+  coord_flip() +
+  labs(y = "Total reads removed during QC (million reads)") +
+  theme_minimal() +
+  theme(axis.text.y  = element_blank(),
+        axis.title.y = element_blank())
+  
+qcp1 + qcp2 +
+  plot_layout(guides = "collect") + 
+  plot_annotation(tag_levels = "A") &
+  theme(legend.position = "bottom", # looks ugly with the tag_levels when = "top"
+        plot.margin = margin(0,10,0,0),
+        legend.box.margin = margin(0,50,0,0),
+        plot.tag = element_text(size = 16, face = "bold"))
+
+
+
+# sanity check to see how many reads were removed for the microbiotacontrol-sample from bowtie2 (expecting low)
+full_read_life %>%
+  filter(sample == "Microbiotacontrol") %>% 
+  summarise(diff = survived_bbduk - survived_bowtie2)
+```
+
+## Plotting read utilization from raw reads
+
+Plotting the number of reads remaining at each step (raw reads, reads that remained after trimming/filtering with fastp, reads that remained after filtering with BBDuk, remaining reads after host removal, number of reads classified by Kraken2, and number of reads all samples were rarefied to)
+
+```{r}
+full_read_life %>% 
+  mutate(sample = fct_reorder(sample, raw_reads, .desc = T)) %>% 
+  pivot_longer(-sample,
+               names_to = "Stage",
+               values_to = "Reads") %>% 
+  mutate(Stage = factor(Stage, levels = c("raw_reads", "survived_fastp", "survived_bbduk", "survived_bowtie2", "kraken_mapped_reads", "rarefied_reads"))) %>% 
+  ggplot(aes(x = sample,
+             y = Reads / 1e6,
+             fill = Stage)) +
+  geom_col(position = "identity") +
+  scale_fill_manual(values = c(raw_reads = "#0072B2", 
+                               survived_fastp = "#4D9078", 
+                               survived_bbduk = "#F78154", 
+                               survived_bowtie2 = "#EBC334", 
+                               kraken_mapped_reads = "#6A1B9A",
+                               rarefied_reads = "#A6E3D0"),
+                  labels = c("Raw reads", "Survived trimming", "Survived complexity filtering", "Survived host removal", "Classified with Kraken2/Bracken", "Rarefied reads")) +
+  scale_y_continuous(breaks = seq(0, 140, by = 20)) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, margin = margin(t = -9)),
+        axis.ticks.x = element_blank(),
+        legend.title = element_blank(),
+        legend.position = "inside",
+        legend.position.inside = c(0.815,0.82),
+        legend.background = element_rect(fill = "white"),
+        axis.title = element_text(face = "bold"),
+        panel.grid.major.y = element_blank(),
+        panel.grid.minor = element_blank()) +
+  labs(x = "Sample", y = "Reads (million)")
+```
+
+
