@@ -10,15 +10,15 @@ The work was conducted as part of a Master’s thesis in Biotechnology at the No
 
 The repository includes code for:
 
-1. Quality control of sequencing reads  
-2. Host DNA removal  
-3. Taxonomic profiling using `nf-core/taxprofiler`  
-4. Post-processing and integration of taxonomic profiles  
-5. Construction and filtering of `phyloseq` objects  
-6. Alpha and beta diversity analyses  
-7. Ordination, PERMANOVA, and mixed-effects modelling  
-8. Differential abundance analysis (ANCOM-BC2)  
-9. Figure generation for the MSc thesis
+1. All bash/SLURM code from HPC saga
+2. Generation and filtering of phyloseq objects
+3. Overview of number of reads per sample
+4. Quality control of sequencing reads
+5. Comparison of taxonomic classifiers
+6. Alpha and beta diversity analyses
+7. Phylum-level differential abundance testing
+8. Species-level differential abundance testing with ANCOM-BC2
+
 
 ---
 
@@ -26,11 +26,6 @@ The repository includes code for:
 
 - `code/` – All analysis scripts (R, bash, SLURM)
 - `reports/` – Rendered HTML versions of Rmd-files for readability
-- `data/` – Metadata and small derived tables (raw data not included)
-- `figures/` – Figures generated for the thesis
-- `docs/` – Supplementary documentation and workflow notes
-
-Large raw sequencing files are not tracked in this repository.
 
 ---
 
