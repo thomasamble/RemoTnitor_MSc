@@ -11,8 +11,8 @@ The work was conducted as part of a Master’s thesis in Biotechnology at the No
 The repository includes code for:
 
 1. All bash/SLURM code from HPC saga
-2. Generation and filtering of phyloseq objects
-3. Overview of number of reads per sample
+2. Overview of number of reads per sample
+3. Generation and filtering of phyloseq objects
 4. Quality control of sequencing reads
 5. Comparison of taxonomic classifiers
 6. Alpha and beta diversity analyses
@@ -24,8 +24,8 @@ The repository includes code for:
 
 ## Repository structure
 
-- `code/` – All analysis scripts (R, bash, SLURM)
-- `reports/` – Rendered HTML versions of Rmd-files for readability
+- `code/` – All analysis scripts (R, bash, SLURM) in Rmd-files
+- `reports/` – Rendered HTML versions of Rmd-files for improved readability
 
 ---
 
