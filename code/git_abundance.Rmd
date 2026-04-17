@@ -3,14 +3,12 @@ title: "Abundances"
 author: "Thomas Amble Karlsen"
 date: "2026-02-12"
 output: 
-  rmdformats::downcute:
-    self_contained: true  
-    thumbnails: true  
-    lightbox: true  
-    gallery: false  
-    highlight: tango  
-    code_folding: show
-    fig_caption: true
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
@@ -24,7 +22,6 @@ if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r
 # Downloads the `rmdformats` package with the document format unless it has been installed previously
 ```
 
-
 ## Loading libraries
 
 ```{r}
@@ -34,12 +31,67 @@ library(microViz) # visualization of microbiome data
 library(patchwork) # plotting
 ```
 
-
 ## Loading data
 
 ```{r, results='hide'}
 readRDS("/Users/thomasamble/Downloads/Master/R_master/rds/phyloseq.rds") %>% 
   list2env(envir = .GlobalEnv)
+```
+
+## Control samples
+
+Creating a barplot of the top 12 species for the two control samples. Also creating tables of the top 10 most abundant species in the Microbiota control sample. Finally creating a table of the relative abundances of the 10 species present in the *ZymoBIOMICS Microbial Community Standard* for the Microbiota control sample, alongside the expected relative abundances of these species.
+
+```{r}
+control_ps %>% 
+  comp_barplot(tax_level = "species", n_taxa = 12)
+
+control_ps %>% 
+  subset_samples(sample_names(control_ps) == "Microbiotacontrol") %>% 
+  tax_transform("compositional") %>% 
+  psmelt() %>% 
+  select(OTU, Sample, Abundance, species) %>% 
+  rename(taxid = OTU) %>% 
+  slice(1:10)
+
+# Bacillus spizizenii is a subspecies of Bacillus subtilis
+
+# Numbers and species from ZymoBIOMICS Microbial Community Standard:
+zymobiomics_species <- c("Pseudomonas aeruginosa", 
+                         "Escherichia coli",
+                         "Salmonella enterica", 
+                         "Limosilactobacillus fermentum",
+                         "Enterococcus faecalis", 
+                         "Staphylococcus aureus",
+                         "Listeria monocytogenes",
+                         "Bacillus subtilis",
+                         "Saccharomyces cerevisiae",
+                         "Cryptococcus neoformans")
+
+control_ps %>% 
+  subset_samples(sample_names(control_ps) == "Microbiotacontrol") %>%
+  tax_transform("compositional") %>% 
+  psmelt() %>% 
+  select(OTU, Sample, Abundance, species) %>% 
+  rename(taxid = OTU,
+         `Observed relative abundance` = Abundance,
+         Species = species) %>% 
+  filter(Species %in% zymobiomics_species) %>% 
+  mutate(Species = factor(Species, levels = zymobiomics_species),
+         `Expected relative abundance` = case_when(Species %in% c("Pseudomonas aeruginosa",
+                                                                  "Escherichia coli",
+                                                                  "Salmonella enterica",
+                                                                  "Limosilactobacillus fermentum",
+                                                                  "Enterococcus faecalis",
+                                                                  "Staphylococcus aureus",
+                                                                  "Listeria monocytogenes",
+                                                                  "Bacillus subtilis") ~ 12 / 100,
+                                                   Species %in% c("Saccharomyces cerevisiae",
+                                                                  "Cryptococcus neoformans") ~ 2 / 100),
+         Difference = `Observed relative abundance` - `Expected relative abundance`,
+         log2FC = log2(`Observed relative abundance` / `Expected relative abundance`)) %>% 
+  select(Species, `Observed relative abundance`, `Expected relative abundance`, Difference, log2FC) %>% 
+  arrange(Species)
 ```
 
 ## Wrangling and plotting
@@ -136,7 +188,7 @@ rarefied_ps %>%
 
 ## Statistics
 
-Aggregating the rarefied phyloseq object to phylum rank, and transforming to relative abundances ("compositional"). Then filtering to only keep bacterial taxa, and filtering out phyla with a mean relative abundance below 1% across all samples. Then fitting an ANOVA with sample-level phylum relative abundance as response variable, and an interaction term with season * location * phylum (main effects and interactions) as explanatory variables. Then performing a TukeyHSD-test on the ANOVA, and extracting contrasts where the compared groups belong to the same phylum, and have p-values below 0.05.
+Aggregating the rarefied phyloseq object to phylum rank, and transforming to relative abundances ("compositional"). Then filtering to only keep bacterial taxa, and filtering out phyla with a mean relative abundance below 1% across all samples. Then fitting an ANOVA with sample-level phylum relative abundance as response variable, and an interaction term with season \* location \* phylum (main effects and interactions) as explanatory variables. Then performing a TukeyHSD-test on the ANOVA, and extracting contrasts where the compared groups belong to the same phylum, and have p-values below 0.05.
 
 ```{r}
 phylum_data <- rarefied_ps %>%
@@ -175,4 +227,3 @@ same_phylum <- Tukey$`season:location:phylum` %>%
 
 same_phylum
 ```
-

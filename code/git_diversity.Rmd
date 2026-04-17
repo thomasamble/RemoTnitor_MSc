@@ -3,14 +3,12 @@ title: "Alpha and beta diversity"
 author: "Thomas Amble Karlsen"
 date: "2026-02-08"
 output: 
-  rmdformats::downcute:
-    self_contained: true  
-    thumbnails: true  
-    lightbox: true  
-    gallery: false  
-    highlight: tango  
-    code_folding: show
-    fig_caption: true
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
@@ -68,7 +66,7 @@ alpha_comp <- left_join(alpha_main, alpha_rarefied, by = "Sample", suffix = c("_
 
 ### Plotting rarefaction effect on alpha diversity metrics
 
-Plotting alpha diversity metrics for rarefied data against non-rarefied data and adding a 1:1 reference line for comparability.
+Plotting alpha diversity metrics for rarefied data against non-rarefied data and adding a 1:1 reference line for comparability. Also testing correlation between alpha diversity metrics before and after rarefaction, using `cor.test()` with Pearson's correlation.
 
 ```{r}
 # Plotting difference in Shannon diversity and Observed richness before and after rarefaction.
@@ -101,6 +99,9 @@ plot_shannon_comp + plot_observed_comp +
   theme(aspect.ratio = 1,
         axis.title = element_text(size = 12),
         axis.text = element_text(size = 10))
+
+cor.test(alpha_comp$Shannon_main, alpha_comp$Shannon_rarefied)
+cor.test(alpha_comp$Observed_main, alpha_comp$Observed_rarefied)
 ```
 
 ### Plotting Shannon diversity across season, location and animal ID
@@ -246,8 +247,8 @@ rarefied_nmds <- rarefied_ps %>%
   dist_calc("bray") %>% 
   ord_calc("NMDS")
 
-xlims <- c(-1.35, 0.65)
-ylims <- c(-0.4, 0.4)
+xlims <- c(-1.35, 0.75)
+ylims <- c(-0.6, 0.6)
 rarefied_nmds@ord # finds the stress-value
 
 b_season <- rarefied_nmds %>% 
@@ -257,7 +258,8 @@ b_season <- rarefied_nmds %>%
   scale_colour_paletteer_d("ltc::trio4") +
   scale_fill_paletteer_d("ltc::trio4") +
   theme_minimal() +
-  theme(legend.position = "right") +
+  theme(legend.position = "right",
+        aspect.ratio = 1) +
   labs(title = "A) Season",
        caption = NULL, 
        colour = "Season", fill = "Season") +
@@ -270,7 +272,8 @@ b_location <- rarefied_nmds %>%
   scale_colour_paletteer_d("ltc::trio1") +
   scale_fill_paletteer_d("ltc::trio1") +
   theme_minimal() +
-  theme(legend.position = "right") +
+  theme(legend.position = "right",
+        aspect.ratio = 1) +
   labs(title = "B) Location",
        caption = NULL,
        colour = "Location", fill = "Location") +
@@ -280,7 +283,8 @@ b_id <- rarefied_nmds %>%
   ord_plot(colour = "id_animal", size = 3) +
   scale_colour_paletteer_d("MoMAColors::Klein") +
   theme_minimal()+
-  theme(legend.position = "right") +
+  theme(legend.position = "right",
+        aspect.ratio = 1) +
   labs(title = "C) Animal ID",
        caption = NULL,
        colour = "Animal ID", fill = "Animal ID") +
@@ -290,6 +294,12 @@ b_id <- rarefied_nmds %>%
 b_season + b_location + b_id + 
   plot_layout(ncol = 1)
 
+ggsave(
+  "nmds.png",
+  width = 7,
+  height = 10,
+  dpi = 300
+)
 
 #legend_box <- theme(legend.position = "right",
                     #legend.background = element_rect(fill = "white", colour = "grey40"),

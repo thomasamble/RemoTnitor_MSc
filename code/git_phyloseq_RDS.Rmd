@@ -3,14 +3,12 @@ title: "git_phyloseq_RDS"
 author: "Thomas Amble Karlsen"
 date: "2026-02-08"
 output: 
-  rmdformats::downcute:
-    self_contained: true  
-    thumbnails: true  
-    lightbox: true  
-    gallery: false  
-    highlight: tango  
-    code_folding: show
-    fig_caption: true
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
@@ -24,6 +22,11 @@ if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r
 # Downloads the `rmdformats` package with the document format unless it has been installed previously
 ```
 
+---
+
+**This file creates an RDS-file containing the phyloseq objects used for downstream analyses**
+
+---
 
 ## Loading libraries
 

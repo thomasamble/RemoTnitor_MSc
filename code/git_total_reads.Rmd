@@ -3,14 +3,12 @@ title: "Total reads"
 author: "Thomas Amble Karlsen"
 date: "2026-02-08"
 output: 
-  rmdformats::downcute:
-    self_contained: true  
-    thumbnails: true  
-    lightbox: true  
-    gallery: false  
-    highlight: tango  
-    code_folding: show
-    fig_caption: true
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
@@ -85,10 +83,11 @@ R1_merged %>%
         axis.text.y = element_text(face = "bold"))
 
 
-# mean read amount (without controls)
+# mean & median read amounts (without controls)
 R1_merged %>% 
   filter(!merged_reads %in% c("Spike-incontrol_R1", "Microbiotacontrol_R1")) %>% 
-  summarise(mean = mean(n_reads))
+  summarise(mean = mean(n_reads),
+            median = median(n_reads))
 ```
 
 

@@ -3,14 +3,12 @@ title: "Taxonomic classifier comparison"
 author: "Thomas Amble Karlsen"
 date: "2026-02-08"
 output: 
-  rmdformats::downcute:
-    self_contained: true  
-    thumbnails: true  
-    lightbox: true  
-    gallery: false  
-    highlight: tango  
-    code_folding: show
-    fig_caption: true
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
@@ -116,12 +114,14 @@ Plotting the percent of QC-undergone reads that were mapped to the databases use
 
 ```{r}
 merged %>%
+  arrange(desc(fraction_classified_kraken)) %>%
+  mutate(sample = factor(sample, levels = sample),
+         sample = fct_rev(sample)) %>% 
   transmute(sample,
             Kraken2 = fraction_classified_kraken,
             Centrifuge = fraction_classified_centrifuge,
             MetaPhlAn = fraction_classified_metaphlan) %>%
   pivot_longer(-sample, names_to = "method", values_to = "fraction") %>%
-  mutate(sample = reorder(sample, fraction, mean)) %>%
   ggplot(aes(x = sample, y = fraction, fill = method)) +
   geom_col(position = position_dodge(width = 0.8)) +
   scale_y_continuous(labels = percent_format(accuracy = 1), limits = c(0, 1)) +
