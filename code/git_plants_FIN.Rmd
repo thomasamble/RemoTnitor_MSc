@@ -1,0 +1,110 @@
+---
+title: "Analysis of plant-associated taxa"
+author: "Thomas Amble Karlsen"
+date: "2026-05-11"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = T,
+                      message = F,
+                      warning = F)
+```
+
+```{r theme, include=FALSE}
+if(!require(rmdformats)) install.packages("rmdformats",repos = "http://cran.us.r-project.org")
+# Downloads the `rmdformats` package with the document format unless it has been installed previously
+```
+
+## Overview
+
+This report presents an exploratory analysis of plant, algal, and lichen-associated taxa detected in fecal samples from semi-domesticated reindeer (RemoTnitor project).
+
+The main focus is on land plants (Streptophyta), as these are expected to reflect dietary input, but certain algae phyla (Chlorophyta, Rhodophyta, and Glaucophyta) and lichen-associated phyla (Ascomycota, Basidiomycota) are also included. Results are presented as relative abundance barplots, summaries of the most abundant taxa across samples, and plots of differentially abundant taxa.
+
+## Loading libraries
+
+```{r}
+library(tidyverse)
+library(phyloseq)
+library(microViz)
+library(kableExtra)
+library(tidytext)
+library(patchwork)
+library(scales)
+```
+
+## Loading data
+
+```{r}
+readRDS("/Users/thomasamble/Downloads/Master/R_master/rds/phyloseq.rds") %>% 
+  list2env(envir = .GlobalEnv)
+```
+
+## Relative abundance of phyla associated with plants, algae, and lichen-associated fungi
+
+To assess the taxonomic groups most relevant for potential dietary signals, the relative abundance of selected phyla was summarized across samples. This included Streptophyta, which represents land plants, as well as Chlorophyta, Rhodophyta and Glaucophyta, which are associated with algae. Ascomycota and Basidiomycota were also included, as these fungal phyla may include lichen-associated taxa and therefore represent potential components of reindeer food intake.
+
+```{r}
+main_ps %>%
+  tax_agg("phylum") %>% 
+  subset_taxa(phylum %in% c("Streptophyta","Chlorophyta","Rhodophyta","Glaucophyta","Ascomycota","Basidiomycota")) %>% 
+  tax_transform("compositional") %>% 
+  psmelt() %>% 
+  mutate(percent_abundance = Abundance * 100) %>% 
+  group_by(phylum) %>% 
+  summarise(mean_abundance = mean(percent_abundance),
+            median_abundance = median(percent_abundance)) %>% 
+  ungroup() %>% 
+  arrange(desc(mean_abundance))
+```
+
+## Creating phyloseq subset
+
+A separate phyloseq object was created containing only taxa assigned to Streptophyta. This subset was used for further investigation of land plant-associated taxa.
+
+```{r}
+landplants <- main_ps %>% 
+  subset_taxa(phylum == "Streptophyta")
+```
+
+## Streptophyta genera
+
+The Streptophyta subset was aggregated at genus level to identify the most abundant land plant-associated genera across samples. Genera were ranked by median relative abundance, providing an overview of which plant-associated taxa contributed most strongly to the Streptophyta signal.
+
+```{r}
+landplants %>% 
+  tax_transform("compositional") %>% 
+  tax_agg("genus") %>% 
+  psmelt() %>% 
+  mutate(percent_abundance = Abundance * 100) %>% 
+  select(Sample, location, season, id_animal, genus, percent_abundance) %>% 
+  remove_rownames() %>% 
+  group_by(genus) %>% 
+  summarise(median_RA = median(percent_abundance, na.rm = T),
+            sd = sd(percent_abundance)) %>% 
+  ungroup() %>% 
+  arrange(desc(median_RA)) %>% 
+  print(n = 15)
+```
+
+To further examine possible feed-associated plant signals, genera corresponding to ingredients in the supplementary pellets were selected from the Streptophyta subset. These included *Avena, Medicago, Triticum, Hordeum, Beta* and *Brassica*. Median relative abundance was then summarized by season and location.
+
+```{r}
+landplants %>% 
+  tax_transform("compositional") %>% 
+  subset_taxa(genus %in% c("Avena", "Medicago", "Triticum", "Hordeum", "Beta", "Brassica")) %>% 
+  tax_agg("genus") %>% 
+  psmelt() %>% 
+  group_by(season, location, genus) %>% 
+  summarise(percent_median_RA = median(Abundance, na.rm = TRUE)*100) %>% 
+  ungroup() %>% 
+  pivot_wider(names_from = genus,
+              values_from = percent_median_RA) %>% 
+  arrange(season, location)
+```
