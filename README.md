@@ -25,7 +25,8 @@ The repository includes code for:
 5. Comparison of taxonomic classifiers  
 6. Alpha and beta diversity analyses  
 7. Phylum-level differential abundance testing  
-8. Species-level differential abundance testing with ANCOM-BC2  
+8. Species-level differential abundance testing with ANCOM-BC2
+9. Analysis of plant-associated taxa  
 
 ---
 
